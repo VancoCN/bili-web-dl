@@ -254,11 +254,6 @@ def ffmpeg(*args):
         raise RuntimeError(f"ffmpeg 失败：{(r.stderr or '').strip()[:200]}")
 
 
-def sanitize(name):
-    clean = re.sub(r"[\\/:*?\"<>|\s]+", "_", name or "video").strip("._")
-    return (clean or "video")[:48]
-
-
 def collect(view, dash, want_page):
     data = view.get("data") or {}
     if not data:
@@ -307,7 +302,9 @@ def grab(dash, tiers, meta):
     want = int(float(QUALITY or 80))
     fits = [t for t in tiers if t["qn"] <= want] or tiers[:1]
     tier = fits[-1]
-    stem = f"{JOB}_{sanitize(meta['title'])}"
+    # 文件名只用 ASCII：GitHub 上传 Release 资产时会丢掉中文，
+    # 用 <job>_<BV号> 保证名字可预期，页面里另外展示中文标题。
+    stem = f"{JOB}_{meta.get('id') or 'video'}"
     tmp = Path(tempfile.mkdtemp(prefix="bili-"))
 
     if KIND == "audio":

@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BiliFetch · 粘贴链接，解析并下载 B 站音频/视频</title>
+<style>
+  :root{
+    --bg:#0a0d13; --card:#111722; --card2:#0e1420; --line:#212a3a; --line2:#2c384d;
+    --fg:#e9eefb; --dim:#8b98ae; --dim2:#64718a;
+    --blue:#24a8f0; --pink:#fb7299; --ok:#37d399; --warn:#ffb454; --err:#ff6b6b;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg); min-height:100vh;
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(700px 340px at 12% -6%, rgba(36,168,240,.16), transparent 70%),
+      radial-gradient(620px 320px at 88% 4%, rgba(251,114,153,.12), transparent 72%);
+  }
+  .wrap{position:relative; z-index:1; max-width:960px; margin:0 auto; padding:22px 20px 70px}
+
+  header{display:flex; align-items:center; gap:14px; margin-bottom:22px}
+  .logo{
+    width:38px; height:38px; border-radius:11px; flex:none; display:grid; place-items:center;
+    background:linear-gradient(140deg,var(--blue),var(--pink)); color:#fff;
+    box-shadow:0 6px 20px rgba(36,168,240,.35);
+  }
+  .brand h1{font-size:18px; margin:0; letter-spacing:.3px; font-weight:650}
+  .brand p{margin:1px 0 0; font-size:12.5px; color:var(--dim)}
+  header .spacer{flex:1}
+  .pill{
+    font-size:12px; padding:5px 11px; border-radius:999px; border:1px solid var(--line);
+    color:var(--dim); background:var(--card2); white-space:nowrap;
+  }
+  .pill.on{color:var(--ok); border-color:rgba(55,211,153,.35); background:rgba(55,211,153,.08)}
+  .pill.off{color:var(--warn); border-color:rgba(255,180,84,.3); background:rgba(255,180,84,.07)}
+
+  .card{
+    background:linear-gradient(180deg,rgba(255,255,255,.025),transparent), var(--card);
+    border:1px solid var(--line); border-radius:var(--r); padding:18px;
+    margin-bottom:14px; box-shadow:0 10px 30px rgba(0,0,0,.25);
+  }
+  .card h2{
+    font-size:13px; margin:0 0 12px; color:var(--dim); font-weight:600;
+    letter-spacing:.6px; text-transform:uppercase;
+  }
+  label.field{display:block; font-size:12.5px; color:var(--dim); margin-bottom:7px}
+
+  .row{display:flex; gap:10px}
+  .row.tight{gap:8px; flex-wrap:wrap}
+  input[type=text],input[type=password],select{
+    width:100%; padding:11px 13px; border-radius:10px; border:1px solid var(--line2);
+    background:#0b1018; color:var(--fg); font-size:14px; outline:none; font-family:inherit;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  input:focus,select:focus{border-color:var(--blue); box-shadow:0 0 0 3px rgba(36,168,240,.16)}
+  input::placeholder{color:#4d5a70}
+  select{appearance:none; background-image:linear-gradient(45deg,transparent 50%,#7c8aa2 50%),linear-gradient(135deg,#7c8aa2 50%,transparent 50%);
+    background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%; background-size:5px 5px,5px 5px; background-repeat:no-repeat; padding-right:34px}
+
+  button{
+    font-family:inherit; font-size:14px; padding:11px 18px; border-radius:10px;
+    border:1px solid var(--line2); background:#182030; color:var(--fg); cursor:pointer;
+    transition:transform .08s, background .15s, border-color .15s; white-space:nowrap;
+  }
+  button:hover{background:#1e2739}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.5; cursor:not-allowed; transform:none}
+  button.primary{
+    background:linear-gradient(135deg,#1f9fe0,#2bb3f5); border-color:transparent; color:#04121b;
+    font-weight:650; box-shadow:0 4px 16px rgba(36,168,240,.28);
+  }
+  button.primary:hover{background:linear-gradient(135deg,#2aaced,#46c0fa)}
+  button.pink{background:linear-gradient(135deg,#ef5f8a,#fb7299); border-color:transparent; color:#2a0713; font-weight:650}
+  button.ghost{background:transparent}
+  a.btn{
+    display:inline-flex; align-items:center; gap:8px; text-decoration:none;
+    padding:11px 18px; border-radius:10px; font-size:14px; font-weight:650;
+    background:linear-gradient(135deg,#28c98b,#37d399); color:#04231a;
+    box-shadow:0 4px 16px rgba(55,211,153,.25);
+  }
+  a.btn:hover{filter:brightness(1.07)}
+
+  .hint{font-size:12.5px; color:var(--dim2); margin-top:9px}
+  .hint code{background:#0b1018; border:1px solid var(--line); padding:1px 5px; border-radius:5px; font-size:11.5px; color:#9fb0c9}
+
+  .err-box{
+    border:1px solid rgba(255,107,107,.35); background:rgba(255,107,107,.08);
+    color:#ffc9c9; padding:12px 14px; border-radius:10px; font-size:13.5px; margin-top:12px;
+    word-break:break-word;
+  }
+  .warn-box{
+    border:1px solid rgba(255,180,84,.3); background:rgba(255,180,84,.07);
+    color:#ffdca8; padding:12px 14px; border-radius:10px; font-size:13.5px; margin-top:12px;
+  }
+
+  /* 结果卡片 */
+  .result-head{display:flex; gap:16px; align-items:flex-start}
+  .cover{
+    width:186px; aspect-ratio:16/10; border-radius:11px; flex:none; object-fit:cover;
+    background:linear-gradient(135deg,#1a2233,#0d131f); border:1px solid var(--line2);
+  }
+  .meta{min-width:0; flex:1}
+  .meta h3{margin:0 0 7px; font-size:17px; line-height:1.4; font-weight:650; word-break:break-word}
+  .subtle{font-size:13px; color:var(--dim); display:flex; gap:14px; flex-wrap:wrap}
+  .subtle b{color:#bac7dd; font-weight:600}
+  .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:11px}
+  .chip{
+    font-size:11.5px; padding:3px 9px; border-radius:999px; border:1px solid var(--line2);
+    color:var(--dim); background:#0d131f;
+  }
+  .chip.hi{color:#9fe3ff; border-color:rgba(36,168,240,.4); background:rgba(36,168,240,.1)}
+  .chip.pk{color:#ffc2d4; border-color:rgba(251,114,153,.4); background:rgba(251,114,153,.1)}
+  .desc{
+    margin-top:13px; font-size:13px; color:var(--dim); line-height:1.7;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+    border-left:2px solid var(--line2); padding-left:11px; white-space:pre-wrap;
+  }
+
+  .divider{height:1px; background:var(--line); margin:17px 0}
+
+  .actions{display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap}
+  .actions .grow{flex:1; min-width:130px}
+
+  /* 时间线 */
+  .steps{display:flex; flex-direction:column; gap:2px; margin-top:4px}
+  .step{display:flex; gap:11px; align-items:flex-start; padding:7px 0; font-size:13.5px; color:var(--dim2)}
+  .dot{
+    width:16px; height:16px; border-radius:50%; flex:none; margin-top:2px;
+    border:2px solid var(--line2); display:grid; place-items:center; font-size:10px;
+  }
+  .step.done{color:#c3cfdf}
+  .step.done .dot{border-color:var(--ok); background:rgba(55,211,153,.15); color:var(--ok)}
+  .step.active{color:#dfe9f7}
+  .step.active .dot{border-color:var(--blue); border-top-color:transparent; animation:spin .9s linear infinite}
+  .step.active .dot span{display:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .bar{height:5px; border-radius:99px; background:#141c2a; overflow:hidden; margin:14px 0 0; border:1px solid var(--line)}
+  .bar i{
+    display:block; height:100%; width:100%; border-radius:99px;
+    background:linear-gradient(90deg,rgba(36,168,240,.15),var(--blue),rgba(36,168,240,.15));
+    animation:pulse 1.25s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.32}50%{opacity:1}}
+
+  .file-row{display:flex; align-items:center; gap:13px; padding:13px; border:1px solid var(--line);
+    border-radius:11px; background:var(--card2); margin-top:6px}
+  .file-ico{width:34px; height:34px; border-radius:9px; display:grid; place-items:center; flex:none;
+    background:rgba(36,168,240,.13); border:1px solid rgba(36,168,240,.3); color:#8ad8ff; font-size:11px; font-weight:700}
+  .file-name{font-size:13.5px; word-break:break-all; line-height:1.45}
+  .file-sub{font-size:12px; color:var(--dim2); margin-top:1px}
+
+  /* 历史 */
+  .hist-item{display:flex; align-items:center; gap:11px; padding:10px 0; border-bottom:1px dashed var(--line); font-size:13px}
+  .hist-item:last-child{border-bottom:0}
+  .hist-item .t{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#cbd6e6}
+  .hist-item .s{color:var(--dim2); font-size:12px; white-space:nowrap}
+  .hist-item a{color:var(--blue); text-decoration:none; font-size:12.5px; white-space:nowrap}
+  .hist-item a:hover{text-decoration:underline}
+  .empty{color:var(--dim2); font-size:13px; padding:6px 0}
+
+  /* 弹窗 */
+  dialog{
+    border:1px solid var(--line2); border-radius:16px; padding:0; color:var(--fg);
+    background:var(--card); width:min(520px,92vw); box-shadow:0 30px 80px rgba(0,0,0,.6);
+  }
+  dialog::backdrop{background:rgba(3,6,12,.72); backdrop-filter:blur(3px)}
+  .dlg-body{padding:20px}
+  .dlg-body h3{margin:0 0 4px; font-size:16px}
+  .dlg-body .hint{margin:0 0 16px}
+  .fgrid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .fgrid .full{grid-column:1/-1}
+  .dlg-foot{display:flex; gap:9px; justify-content:flex-end; padding:14px 20px;
+    border-top:1px solid var(--line); background:var(--card2)}
+  .dlg-foot .left{margin-right:auto; font-size:12px; color:var(--dim2); align-self:center}
+
+  .hidden{display:none !important}
+  footer{text-align:center; font-size:12px; color:var(--dim2); margin-top:26px; line-height:1.9}
+  footer a{color:var(--dim)}
+
+  @media (max-width:640px){
+    .result-head{flex-direction:column}
+    .cover{width:100%}
+    .row{flex-wrap:wrap}
+    .fgrid{grid-template-columns:1fr}
+    .wrap{padding:16px 14px 50px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 3.5 4.5 6M17 3.5 19.5 6"/><rect x="2.5" y="6" width="19" height="14.5" rx="3.5"/><path d="M10 11l5 2.7-5 2.7z" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <h1>BiliFetch</h1>
+      <p>粘贴 B 站链接 · 解析元数据 · 可选音频或视频下载</p>
+    </div>
+    <div class="spacer"></div>
+    <span id="cfgPill" class="pill off">未配置</span>
+    <button id="btnCfg" class="ghost" type="button">设置</button>
+  </header>
+
+  <!-- 1. 输入 -->
+  <section class="card">
+    <h2>① 粘贴链接</h2>
+    <div class="row">
+      <input id="url" type="text" spellcheck="false" placeholder="https://www.bilibili.com/video/BV1xx411c7mD  或直接粘贴 BV 号">
+      <button id="btnParse" class="primary" type="button">解析</button>
+    </div>
+    <div class="hint">支持 <code>bilibili.com/video/BV…</code>、<code>?p=2</code> 分 P、<code>av</code> 号、<code>b23.tv</code> 短链，也可以只给 BV 号。</div>
+    <div id="errBox" class="err-box hidden"></div>
+    <div id="warnBox" class="warn-box hidden"></div>
+  </section>
+
+  <!-- 2. 结果 -->
+  <section id="resultCard" class="card hidden">
+    <h2>② 解析结果</h2>
+    <div class="result-head">
+      <img id="cover" class="cover" alt="封面" referrerpolicy="no-referrer">
+      <div class="meta">
+        <h3 id="mTitle">—</h3>
+        <div class="subtle">
+          <span>UP 主 <b id="mUp">—</b></span>
+          <span>时长 <b id="mDur">—</b></span>
+          <span>播放 <b id="mView">—</b></span>
+        </div>
+        <div class="chips" id="mChips"></div>
+        <div class="desc" id="mDesc"></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h2>③ 选择下载形式</h2>
+    <div class="actions">
+      <div class="grow">
+        <label class="field" for="pageSel">分 P（多 P 视频）</label>
+        <select id="pageSel"></select>
+      </div>
+      <div class="grow">
+        <label class="field" for="quality">视频清晰度上限</label>
+        <select id="quality"></select>
+      </div>
+      <button id="btnAudio" class="pink" type="button">下载音频 MP3</button>
+      <button id="btnVideo" class="primary" type="button">下载视频 MP4</button>
+    </div>
+    <div class="hint" id="qHint"></div>
+  </section>
+
+  <!-- 3. 进度 -->
+  <section id="taskCard" class="card hidden">
+    <h2>④ 任务进度</h2>
+    <div class="steps" id="steps"></div>
+    <div class="bar" id="taskBar"><i></i></div>
+    <div class="hint" id="taskHint">—</div>
+    <div id="taskDone" class="hidden"></div>
+    <div id="taskErr" class="err-box hidden"></div>
+  </section>
+
+  <!-- 4. 历史 -->
+  <section class="card">
+    <h2>最近的下载</h2>
+    <div id="histList"><div class="empty">还没有记录。</div></div>
+    <div class="hint">Release 资产保留 24 小时后自动清理，届时旧链接会失效。</div>
+  </section>
+
+  <footer>
+    解析与转码全部在 GitHub Actions 上完成 · 页面本身不接触视频流<br>
+    <a href="https://github.com" target="_blank" rel="noopener">GitHub</a> ·
+    仅供个人备份使用，请遵守平台条款与版权规定
+  </footer>
+</div>
+
+<!-- 设置 -->
+<dialog id="cfgDlg">
+  <form method="dialog" id="cfgForm">
+    <div class="dlg-body">
+      <h3>连接仓库</h3>
+      <p class="hint">网页通过 GitHub API 触发 Actions 工作流，需要一个有权限的 token。</p>
+      <div class="fgrid">
+        <div>
+          <label class="field" for="cfgOwner">仓库所有者</label>
+          <input id="cfgOwner" type="text" spellcheck="false" placeholder="your-name">
+        </div>
+        <div>
+          <label class="field" for="cfgRepo">仓库名</label>
+          <input id="cfgRepo" type="text" spellcheck="false" placeholder="bili-web-dl">
+        </div>
+        <div>
+          <label class="field" for="cfgRef">分支</label>
+          <input id="cfgRef" type="text" spellcheck="false" placeholder="main" value="main">
+        </div>
+        <div>
+          <label class="field" for="cfgToken">Personal Access Token</label>
+          <input id="cfgToken" type="password" spellcheck="false" placeholder="github_pat_…">
+        </div>
+      </div>
+      <div class="hint" style="margin-top:14px">
+        Token 只保存在本机浏览器（localStorage），不会发往除 api.github.com 以外的任何地址。
+        建议新建 <b>Fine-grained token</b>，仅授权这一个仓库，权限勾选
+        <code>Actions: Read and write</code> 与 <code>Contents: Read and write</code>，并设置较短有效期。
+      </div>
+      <div id="cfgMsg" class="hint"></div>
+    </div>
+    <div class="dlg-foot">
+      <span class="left" id="cfgState"></span>
+      <button type="button" id="btnTest">测试连接</button>
+      <button type="button" id="btnClear" class="ghost">清空</button>
+      <button type="button" id="btnSave" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+
+  var API = 'https://api.github.com';
+  var WORKFLOW = 'bili.yml';
+  var CFG_KEY = 'bilifetch.cfg.v1';
+  var HIST_KEY = 'bilifetch.hist.v1';
+  var DEMO = /(\?|&)demo=1/.test(location.search);
+
+  var cfg = { owner: '', repo: '', ref: 'main', token: '' };
+  var meta = null;
+  var busy = false;
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function fmtDur(sec) {
+    sec = Math.round(Number(sec) || 0);
+    if (!sec) return '—';
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    var mm = (h ? String(m).padStart(2, '0') : String(m));
+    return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+  }
+  function fmtNum(n) {
+    n = Number(n) || 0;
+    if (n >= 100000000) return (n / 100000000).toFixed(1) + ' 亿';
+    if (n >= 10000) return (n / 10000).toFixed(1) + ' 万';
+    return String(n);
+  }
+  function newId() {
+    var s = '';
+    while (s.length < 10) s += Math.random().toString(36).slice(2);
+    return s.slice(0, 10);
+  }
+  function ok() { return !!(cfg.owner && cfg.repo && cfg.token); }
+
+  /* ---------- 配置 ---------- */
+  function loadCfg() {
+    try { var raw = localStorage.getItem(CFG_KEY); if (raw) cfg = Object.assign(cfg, JSON.parse(raw)); } catch (e) {}
+    if (!cfg.owner || !cfg.repo) guessRepo();
+  }
+  function guessRepo() {
+    var host = location.hostname || '';
+    var m = /^([\w-]+)\.github\.io$/.exec(host);
+    if (m) {
+      var seg = location.pathname.split('/').filter(Boolean);
+      cfg.owner = m[1];
+      cfg.repo = seg[0] || '';
+    }
+  }
+  function saveCfg() {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+    paintCfg();
+  }
+  function paintCfg() {
+    var pill = $('#cfgPill');
+    if (ok()) {
+      pill.textContent = cfg.owner + '/' + cfg.repo;
+      pill.className = 'pill on';
+    } else {
+      pill.textContent = '未配置仓库';
+      pill.className = 'pill off';
+    }
+    var f = {
+      owner: $('#cfgOwner'), repo: $('#cfgRepo'),
+      ref: $('#cfgRef'), token: $('#cfgToken')
+    };
+    f.owner.value = cfg.owner || '';
+    f.repo.value = cfg.repo || '';
+    f.ref.value = cfg.ref || 'main';
+    f.token.value = cfg.token || '';
+  }
+
+  /* ---------- GitHub API ---------- */
+  function ghFetch(path, opt) {
+    opt = opt || {};
+    var headers = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (cfg.token) headers['Authorization'] = 'Bearer ' + cfg.token;
+    if (opt.body) headers['Content-Type'] = 'application/json';
+    return fetch(API + path, {
+      method: opt.method || 'GET',
+      headers: headers,
+      body: opt.body ? JSON.stringify(opt.body) : undefined
+    }).then(function (res) {
+      if (res.status === 404 && opt.allow404) return null;
+      if (!res.ok) {
+        return res.text().then(function (txt) {
+          var msg = '';
+          try { msg = (JSON.parse(txt) || {}).message || ''; } catch (e) { msg = txt.slice(0, 120); }
+          throw new Error('GitHub API ' + res.status + (msg ? ' · ' + msg : ''));
+        });
+      }
+      if (res.status === 204) return {};
+      return res.text().then(function (t) { try { return t ? JSON.parse(t) : {}; } catch (e) { return {}; } });
+    }, function (err) {
+      throw new Error('连不上 GitHub API（' + (err && err.message ? err.message : 'network') + '）');
+    });
+  }
+
+  function dispatch(mode, extra) {
+    var inputs = { job: newId(), mode: mode, url: extra.url };
+    if (mode === 'download') { inputs.kind = extra.kind; inputs.quality = extra.quality; }
+    return ghFetch('/repos/' + cfg.owner + '/' + cfg.repo + '/actions/workflows/' + WORKFLOW + '/dispatches', {
+      method: 'POST',
+      body: { ref: cfg.ref || 'main', inputs: inputs }
+    }).then(function () { return inputs.job; });
+  }
+
+  /* ---------- 视图 ---------- */
+  function showErr(msg) {
+    var box = $('#errBox');
+    box.textContent = msg;
+    box.classList.remove('hidden');
+  }
+  function clearErr() { $('#errBox').classList.add('hidden'); }
+
+  function renderResult(m) {
+    meta = m;
+    $('#resultCard').classList.remove('hidden');
+    $('#cover').src = m.cover || '';
+    $('#mTitle').textContent = m.title || '未命名';
+    $('#mUp').textContent = m.uploader || '未知';
+    $('#mDur').textContent = fmtDur(m.duration);
+    $('#mView').textContent = m.view ? fmtNum(m.view) : '—';
+    $('#mDesc').textContent = m.desc || '';
+    $('#mDesc').classList.toggle('hidden', !m.desc);
+
+    var chips = [];
+    var tiers = (m.qualities || []).filter(function (q) { return q && q.label > 0; });
+    tiers.slice().reverse().forEach(function (q, i) {
+      chips.push('<span class="chip' + (i === 0 ? ' hi' : '') + '">' + q.label + 'P</span>');
+    });
+    if (m.audio_abr) chips.push('<span class="chip pk">音频 ' + Math.round(m.audio_abr) + ' kbps</span>');
+    if (m.id) chips.push('<span class="chip">' + esc(m.id) + '</span>');
+    if (!m.logged_in) chips.push('<span class="chip">未登录</span>');
+    $('#mChips').innerHTML = chips.join('');
+
+    var pageSel = $('#pageSel');
+    var pages = m.pages || [];
+    pageSel.innerHTML = pages.length > 1
+      ? pages.map(function (p) {
+          return '<option value="' + p.index + '">P' + p.index + ' · ' + esc(p.title) +
+                 ' (' + fmtDur(p.duration) + ')</option>';
+        }).join('')
+      : '<option value="1">单个视频</option>';
+    pageSel.disabled = pages.length <= 1;
+
+    var q = $('#quality');
+    var labels = tiers.map(function (t) { return t.label; });
+    if (!labels.length) labels = [720];
+    var preferred = labels.indexOf(720) > -1 ? 720 : labels[labels.length - 1];
+    q.innerHTML = labels.map(function (v) {
+      return '<option value="' + v + '"' + (v === preferred ? ' selected' : '') + '>' + v + 'P</option>';
+    }).join('');
+
+    $('#qHint').textContent = m.logged_in
+      ? '已配置 Cookie，可选档位取决于该账号对这条视频的权限（大会员 / 60fps 仍可能需要更高权益）。'
+      : '以上档位来自 B 站接口的实际返回；未登录时 60fps、HDR、大会员专享档位通常拿不到，配置 BILI_COOKIE 后可解锁。';
+  }
+
+  function setSteps(list, activeIdx) {
+    $('#steps').innerHTML = list.map(function (t, i) {
+      var cls = i < activeIdx ? 'done' : (i === activeIdx ? 'active' : '');
+      var ico = i < activeIdx ? '✓' : '<span></span>';
+      return '<div class="step ' + cls + '"><div class="dot">' + ico + '</div><div>' + esc(t) + '</div></div>';
+    }).join('');
+  }
+
+  function taskStart(title) {
+    $('#taskCard').classList.remove('hidden');
+    $('#taskDone').classList.add('hidden');
+    $('#taskDone').innerHTML = '';
+    $('#taskErr').classList.add('hidden');
+    $('#taskBar').classList.remove('hidden');
+    setSteps([title, 'Actions 运行中', '取回结果'], 0);
+    $('#taskHint').textContent = '已提交到 Actions，正在排队…';
+  }
+
+  function taskRunning(job, elapsed) {
+    setSteps(['提交任务', 'Actions 运行中', '取回结果'], 1);
+    $('#taskHint').innerHTML = '已运行 <b>' + elapsed + '</b> 秒 · 免费 runner 冷启动通常需要 20–60 秒 · ' +
+      '<a href="https://github.com/' + esc(cfg.owner + '/' + cfg.repo) + '/actions" target="_blank" rel="noopener" style="color:#24a8f0">查看运行日志</a>';
+  }
+
+  function taskFailed(job, msg) {
+    $('#taskBar').classList.add('hidden');
+    setSteps(['提交任务', 'Actions 运行中', '取回结果'], 1);
+    $('#taskErr').classList.remove('hidden');
+    $('#taskErr').innerHTML = esc(msg) + '<br><a href="https://github.com/' + esc(cfg.owner + '/' + cfg.repo) +
+      '/actions" target="_blank" rel="noopener" style="color:#ffb454">打开运行日志</a>';
+    $('#taskHint').textContent = '';
+  }
+
+  function taskDoneFile(data) {
+    $('#taskBar').classList.add('hidden');
+    setSteps(['提交任务', 'Actions 运行中', '取回结果'], 3);
+    $('#taskHint').textContent = '耗时 ' + (data.elapsed || 0) + ' 秒';
+    var f = data.file || {};
+    var box = $('#taskDone');
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '<div class="file-row">' +
+        '<div class="file-ico">' + esc((f.ext || '').toUpperCase() || 'FILE') + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="file-name">' + esc(f.name || '文件') + '</div>' +
+          '<div class="file-sub">' + esc(f.size_human || '') + ' · ' + esc(data.title || '') + '</div>' +
+        '</div>' +
+        '<a class="btn" href="' + esc(data.download_url) + '">下载</a>' +
+      '</div>';
+  }
+
+  /* ---------- 主流程 ---------- */
+  function targetUrl() {
+    var p = Number(($('#pageSel') || {}).value || 1);
+    if (meta && meta.id && p > 1) {
+      return 'https://www.bilibili.com/video/' + meta.id + '?p=' + p;
+    }
+    return $('#url').value.trim();
+  }
+
+  function guard() {
+    if (DEMO) { showErr('当前是演示模式（?demo=1），不会真的调用 GitHub。'); return false; }
+    if (!ok()) {
+      showErr('还没配置仓库与 token，点右上角「设置」填写后重试。');
+      $('#cfgDlg').showModal();
+      return false;
+    }
+    if (busy) { showErr('正在执行上一个任务，请等它结束。'); return false; }
+    return true;
+  }
+
+  function doParse() {
+    var raw = $('#url').value.trim();
+    if (!raw) { showErr('先粘贴一个 B 站链接。'); return; }
+    if (!guard()) return;
+    clearErr();
+    busy = true;
+    setButtons(true);
+    taskStart('提交解析任务');
+
+    dispatch('parse', { url: raw }).then(function (job) {
+      return waitRelease(job, '解析');
+    }).then(function (rel) {
+      var data = parseBody(rel.body);
+      if (!data.ok) throw new Error(data.error || '解析失败');
+      setSteps(['提交任务', 'Actions 运行中', '取回结果'], 3);
+      $('#taskBar').classList.add('hidden');
+      $('#taskCard').classList.add('hidden');
+      renderResult(data);
+      if (data.pages && data.pages.length > 1) {
+        $('#resultCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }).catch(function (e) {
+      taskFailed('', e.message);
+      showErr(e.message);
+    }).then(function () {
+      busy = false;
+      setButtons(false);
+    });
+  }
+
+  function doDownload(kind) {
+    if (!guard()) return;
+    clearErr();
+    busy = true;
+    setButtons(true);
+    taskStart('提交下载任务');
+
+    var quality = ($('#quality') || {}).value || '720';
+    dispatch('download', { url: targetUrl(), kind: kind, quality: quality }).then(function (job) {
+      return waitRelease(job, '下载');
+    }).then(function (rel) {
+      var data = parseBody(rel.body);
+      if (!data.ok) throw new Error(data.error || '下载失败');
+      var asset = (rel.assets || []).filter(function (a) {
+        return /\.(mp3|mp4|m4a|webm|mkv)$/i.test(a.name);
+      })[0];
+      if (!asset) throw new Error('Actions 完成但没有产出文件，请看运行日志。');
+      data.download_url = asset.browser_download_url;
+      data.file = data.file || { name: asset.name, size: asset.size, ext: (asset.name.split('.').pop() || '') };
+      taskDoneFile(data);
+      pushHistory({
+        job: data.job, title: data.title, kind: kind, name: asset.name,
+        size: data.file.size_human || '', url: asset.browser_download_url, ts: Date.now()
+      });
+      renderHistory();
+    }).catch(function (e) {
+      taskFailed('', e.message);
+      showErr(e.message);
+    }).then(function () {
+      busy = false;
+      setButtons(false);
+    });
+  }
+
+  function parseBody(body) {
+    try { return JSON.parse(String(body || '{}')); }
+    catch (e) { return { ok: false, error: '结果格式异常：' + String(body).slice(0, 120) }; }
+  }
+
+  function waitRelease(job, label) {
+    var started = Date.now();
+    var deadline = started + 9 * 60 * 1000;
+    var ticker = setInterval(function () {
+      taskRunning(job, Math.round((Date.now() - started) / 1000));
+    }, 1000);
+    taskRunning(job, 0);
+
+    function step() {
+      if (Date.now() > deadline) {
+        clearInterval(ticker);
+        return Promise.reject(new Error(label + '超时（9 分钟）。可能是 Actions 队列拥堵或工作流报错。'));
+      }
+      return ghFetch('/repos/' + cfg.owner + '/' + cfg.repo + '/releases/tags/dl-' + job, { allow404: true })
+        .then(function (rel) {
+          if (rel) { clearInterval(ticker); return rel; }
+          return sleep(3000).then(step);
+        }, function (err) {
+          clearInterval(ticker);
+          throw err;
+        });
+    }
+    return step().then(function (rel) { clearInterval(ticker); return rel; }, function (e) {
+      clearInterval(ticker);
+      throw e;
+    });
+  }
+
+  function setButtons(disabled) {
+    ['#btnParse', '#btnAudio', '#btnVideo'].forEach(function (s) {
+      var el = $(s); if (el) el.disabled = disabled;
+    });
+  }
+
+  /* ---------- 历史 ---------- */
+  function readHist() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]') || []; } catch (e) { return []; }
+  }
+  function pushHistory(item) {
+    var list = readHist().filter(function (x) { return x.job !== item.job; });
+    list.unshift(item);
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, 12))); } catch (e) {}
+  }
+  function renderHistory() {
+    var list = readHist();
+    var box = $('#histList');
+    if (!list.length) { box.innerHTML = '<div class="empty">还没有记录。</div>'; return; }
+    var now = Date.now();
+    box.innerHTML = list.map(function (it) {
+      var hours = (now - (it.ts || 0)) / 3600000;
+      var expired = hours > 24;
+      var when = hours < 1 ? Math.max(1, Math.round(hours * 60)) + ' 分钟前'
+        : hours < 24 ? Math.round(hours) + ' 小时前' : Math.round(hours / 24) + ' 天前';
+      return '<div class="hist-item">' +
+        '<span class="chip">' + (it.kind === 'video' ? '视频' : '音频') + '</span>' +
+        '<span class="t" title="' + esc(it.title || '') + '">' + esc(it.title || it.name || '未命名') + '</span>' +
+        '<span class="s">' + esc(it.size || '') + ' · ' + when + '</span>' +
+        (expired ? '<span class="s">已过期</span>'
+                 : '<a href="' + esc(it.url) + '">下载</a>') +
+      '</div>';
+    }).join('');
+  }
+
+  /* ---------- 绑定 ---------- */
+  function bind() {
+    $('#btnParse').addEventListener('click', doParse);
+    $('#url').addEventListener('keydown', function (e) { if (e.key === 'Enter') doParse(); });
+    $('#url').addEventListener('paste', function () { setTimeout(clearErr, 30); });
+    $('#btnAudio').addEventListener('click', function () { doDownload('audio'); });
+    $('#btnVideo').addEventListener('click', function () { doDownload('video'); });
+
+    $('#btnCfg').addEventListener('click', function () {
+      $('#cfgMsg').textContent = '';
+      $('#cfgDlg').showModal();
+    });
+    $('#btnSave').addEventListener('click', function () {
+      cfg.owner = $('#cfgOwner').value.trim();
+      cfg.repo = $('#cfgRepo').value.trim();
+      cfg.ref = $('#cfgRef').value.trim() || 'main';
+      cfg.token = $('#cfgToken').value.trim();
+      saveCfg();
+      $('#cfgDlg').close();
+      clearErr();
+    });
+    $('#btnClear').addEventListener('click', function () {
+      cfg = { owner: '', repo: '', ref: 'main', token: '' };
+      try { localStorage.removeItem(CFG_KEY); } catch (e) {}
+      paintCfg();
+      $('#cfgMsg').textContent = '已清空本机保存的配置。';
+    });
+    $('#btnTest').addEventListener('click', function () {
+      var o = $('#cfgOwner').value.trim(), r = $('#cfgRepo').value.trim();
+      var msg = $('#cfgMsg');
+      if (!o || !r) { msg.textContent = '先填写仓库所有者与仓库名。'; return; }
+      msg.textContent = '测试中…';
+      var backup = { owner: cfg.owner, repo: cfg.repo, token: cfg.token };
+      cfg.owner = o; cfg.repo = r; cfg.token = $('#cfgToken').value.trim();
+      ghFetch('/repos/' + o + '/' + r).then(function (repo) {
+        msg.textContent = '仓库可访问：' + repo.full_name + (repo.private ? '（私有仓库，下载链接需要登录）' : '（公开仓库）');
+      }).catch(function (e) {
+        msg.textContent = '失败：' + e.message;
+        cfg.owner = backup.owner; cfg.repo = backup.repo; cfg.token = backup.token;
+      });
+    });
+  }
+
+  /* ---------- 演示 ---------- */
+  function demo() {
+    $('#url').value = 'https://www.bilibili.com/video/BV1ugxq6HEfH';
+    renderResult({
+      ok: true, id: 'BV1ugxq6HEfH', title: '灭建国的超能力', uploader: '抽象生活先生',
+      duration: 125.5, view: 1284000, cover: 'https://i1.hdslb.com/bfs/archive/2d149e67cd059e20a3a576a85b9d068a67e693db.jpg',
+      desc: '这是一段用于界面预览的占位简介文本，实际内容由 Actions 解析 B 站接口后返回。',
+      qualities: [{ label: 360, height: 480 }, { label: 480, height: 640 },
+                  { label: 720, height: 960 }, { label: 1080, height: 1440 }],
+      audio_abr: 164.2, logged_in: false,
+      pages: [{ index: 1, title: '正片', duration: 125 }, { index: 2, title: '花絮', duration: 96 }]
+    });
+    try {
+      localStorage.setItem(HIST_KEY, JSON.stringify([{
+        job: 'demo0001', title: '灭建国的超能力', kind: 'audio',
+        name: 'demo_灭建国的超能力.mp3', size: '2.4 MB', url: '#', ts: Date.now() - 300000
+      }, {
+        job: 'demo0002', title: '【4K】城市夜景延时摄影合集', kind: 'video',
+        name: 'demo_city.mp4', size: '48.1 MB', url: '#', ts: Date.now() - 7200000
+      }]));
+    } catch (e) {}
+    renderHistory();
+    $('#cfgPill').textContent = '演示模式';
+    $('#cfgPill').className = 'pill';
+  }
+
+  function boot() {
+    loadCfg();
+    paintCfg();
+    bind();
+    renderHistory();
+    if (DEMO) demo();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

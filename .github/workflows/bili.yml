@@ -1,0 +1,95 @@
+name: bili-fetch
+
+# 由网页 index.html 通过 REST API (workflow_dispatch) 触发。
+# 结果统一发布到 Release（tag = dl-<job>）：
+#   Release 正文 = meta.json（前端读取的元数据 / 错误信息）
+#   Release 资产 = 下载好的 mp3 / mp4
+run-name: bili ${{ inputs.mode }} ${{ inputs.job }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "任务 ID（前端生成，用于回捞结果）"
+        required: true
+        type: string
+      mode:
+        description: "parse=只解析元数据 / download=解析并下载"
+        required: true
+        type: choice
+        options: [parse, download]
+        default: parse
+      url:
+        description: "B 站链接或 BV 号"
+        required: true
+        type: string
+      kind:
+        description: "download 时下载音频还是视频"
+        required: false
+        type: choice
+        options: [audio, video]
+        default: audio
+      quality:
+        description: "视频高度上限：360 / 480 / 720 / 1080"
+        required: false
+        type: string
+        default: "720"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: bili-${{ inputs.job }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 yt-dlp
+        run: |
+          python -m pip install -U --quiet yt-dlp
+          python -m yt_dlp --version
+          ffmpeg -version | head -n 1
+
+      - name: 准备 Cookie（可选，用于 720P 以上）
+        env:
+          BILI_COOKIE: ${{ secrets.BILI_COOKIE }}
+        run: |
+          if [ -n "${BILI_COOKIE:-}" ]; then
+            printf '%s\n' "$BILI_COOKIE" > cookies.txt
+            echo "已启用 Cookie，可解析高清晰度"
+          else
+            echo "未配置 BILI_COOKIE，以游客身份运行（最高 480P）"
+          fi
+
+      - name: 清理过期 Release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: python scripts/cleanup.py
+
+      - name: 解析 / 下载
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          URL_RAW: ${{ inputs.url }}
+          KIND: ${{ inputs.kind }}
+          QUALITY: ${{ inputs.quality }}
+          JOB: ${{ inputs.job }}
+        run: python scripts/bili.py
+
+      - name: 发布结果
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          JOB: ${{ inputs.job }}
+        run: bash scripts/publish.sh

@@ -35,6 +35,7 @@ import uuid
 from pathlib import Path
 
 OUT = Path("out")
+OUT.mkdir(parents=True, exist_ok=True)
 MODE = os.environ.get("MODE", "parse").strip()
 URL_RAW = os.environ.get("URL_RAW", "").strip()
 KIND = os.environ.get("KIND", "audio").strip()

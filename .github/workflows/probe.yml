@@ -1,0 +1,91 @@
+name: probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: "对照组编号"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -U --quiet yt-dlp
+          python -m pip install --quiet curl_cffi || true
+          python -c "import curl_cffi; print('curl_cffi ok')" || echo "curl_cffi 缺失"
+
+      - name: 跑对照
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          N: ${{ inputs.n }}
+        run: |
+          set +e
+          URL="https://www.bilibili.com/video/BV1ugxq6HEfH"
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+          OUT=/tmp/report.md
+          echo "runner: $(hostname) | $(date -u)" > $OUT
+          echo "" >> $OUT
+
+          run() {
+            local name="$1"; shift
+            local log=/tmp/try.log
+            if "$@" > $log 2>&1; then
+              echo "- [x] $name : OK" >> $OUT
+            else
+              echo "- [ ] $name : FAIL — $(grep -iE 'ERROR|HTTP Error' $log | tail -1 | cut -c1-220)" >> $OUT
+            fi
+          }
+
+          # A 默认
+          run "A 默认 yt-dlp" python -m yt_dlp -J --no-warnings --no-playlist "$URL"
+
+          # B 真实 UA + Referer
+          run "B UA+Referer" python -m yt_dlp -J --no-warnings --no-playlist \
+              --user-agent "$UA" --add-header "Referer:https://www.bilibili.com/" "$URL"
+
+          # C 再加 buvid3 cookie
+          printf '.bilibili.com\tTRUE\t/\tFALSE\t1893456000\tbuvid3\t%s\n' "$(cat /proc/sys/kernel/random/uuid)infoc" > /tmp/c.txt
+          run "C UA+Referer+buvid3" python -m yt_dlp -J --no-warnings --no-playlist \
+              --cookies /tmp/c.txt --user-agent "$UA" \
+              --add-header "Referer:https://www.bilibili.com/" "$URL"
+
+          # D --impersonate（TLS 指纹）
+          run "D impersonate chrome" python -m yt_dlp -J --no-warnings --no-playlist \
+              --impersonate chrome "$URL"
+
+          # E 直接打 API
+          code=$(curl -s -o /tmp/api.json -w "%{http_code}" -A "$UA" \
+            "https://api.bilibili.com/x/web-interface/view?bvid=BV1ugxq6HEfH")
+          echo "- [api] view 接口 HTTP $code — $(head -c 120 /tmp/api.json)" >> $OUT
+
+          # F 直接抓网页
+          code=$(curl -s -o /dev/null -w "%{http_code}" -A "$UA" \
+            -H "Referer: https://www.bilibili.com/" "$URL")
+          echo "- [web] 视频页 HTTP $code" >> $OUT
+
+          # G playurl 接口（看是否也被拦）
+          code=$(curl -s -o /tmp/pu.json -w "%{http_code}" -A "$UA" \
+            -H "Referer: https://www.bilibili.com/" \
+            "https://api.bilibili.com/x/player/playurl?bvid=BV1ugxq6HEfH&cid=43184164631&qn=80&fnval=4048")
+          echo "- [api] playurl 接口 HTTP $code — $(head -c 120 /tmp/pu.json)" >> $OUT
+
+          echo "" >> $OUT
+          echo "yt-dlp: $(python -m yt_dlp --version) | curl_cffi: $(python -c 'import curl_cffi;print(curl_cffi.__version__)' 2>/dev/null || echo none)" >> $OUT
+
+          gh release delete "probe-$N" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "probe-$N" --title "probe $N" --notes-file $OUT >/dev/null
+          echo "报告已发布"

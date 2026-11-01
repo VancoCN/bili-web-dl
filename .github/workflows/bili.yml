@@ -56,10 +56,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 环境检查
+      - name: 安装 ffmpeg
         run: |
-          python -V
-          ffmpeg -version | head -n 1
+          # ubuntu-latest 镜像并不保证自带 ffmpeg，必须显式安装并校验
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+          command -v ffmpeg
+          ffmpeg -hide_banner -version | head -n 1
+          ffmpeg -hide_banner -h encoder=libmp3lame | head -n 3
 
       - name: 清理过期 Release
         continue-on-error: true

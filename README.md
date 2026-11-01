@@ -14,8 +14,9 @@
   │  ① POST /actions/workflows/bili.yml/dispatches  {job, mode, url, ...}
   ▼
 GitHub Actions (ubuntu-latest)
-  │  ② yt-dlp 解析元数据 → meta.json
-  │  ③ (mode=download) yt-dlp 抓流 → ffmpeg 转 mp3 / 合并 mp4
+  │  ② view 接口拿元数据 / 分P → meta.json
+  │  ③ (mode=download) wbi 签名的 playurl 接口拿 DASH → 直连 CDN 拉流
+  │     ffmpeg：音频转 mp3，视频流+音频流 -c copy 合并 mp4
   │  ④ gh release create dl-<job> --notes-file meta.json + 上传媒体
   ▼
 浏览器
@@ -26,12 +27,40 @@ GitHub Actions (ubuntu-latest)
 
 用 `job` 这个随机 ID 配对请求与结果，避免并发请求互相串号。
 
+## 为什么不用 yt-dlp（重要）
+
+一开始的实现是 `yt-dlp -J` + `yt-dlp -f ...`，本地跑得很好，**但在 Actions 上必然失败**：
+
+```
+[BiliBili] BV1ugxq6HEfH: Unable to download webpage: HTTP Error 412: Precondition Failed
+```
+
+我在真实 runner 上做过对照实验，结论很明确：
+
+| 做法 | 结果 |
+| --- | --- |
+| `yt-dlp -J`（默认） | 412 |
+| 加真实 Chrome UA + `Referer` | 412 |
+| 再加 `buvid3` 等成套 cookie | 412 |
+| `--impersonate chrome`（curl_cffi，伪造 TLS 指纹） | 412 |
+| `curl https://www.bilibili.com/video/BV...` | **412** |
+| `curl https://api.bilibili.com/x/web-interface/view?...` | **200** |
+| `curl https://api.bilibili.com/x/player/wbi/playurl?...` | **200** |
+
+也就是说 B 站按 **IP 段**风控了机房地址：网页抓不了，API 完全不拦。yt-dlp 的第一步
+就是抓网页，所以它在 Actions 上没有救。改成直连 API 后一切正常：
+
+1. `x/web-interface/view` → 标题 / UP / 时长 / 分 P / cid
+2. `x/web-interface/nav` → wbi 签名密钥，再对 playurl 参数做 `w_rid` 签名
+3. `x/player/wbi/playurl` → DASH 的视频流与音频流地址
+4. 带 `Referer` / `UA` 直接 HTTP 拉流，CDN 返回 206 正常
+
 ## 目录
 
 ```
 index.html                    单文件前端（无构建、无依赖）
 .github/workflows/bili.yml    工作流：解析 / 下载 / 发布 / 清理
-scripts/bili.py               yt-dlp 探测与下载，产出 out/meta.json
+scripts/bili.py               走 B 站 API 的解析与下载，产出 out/meta.json
 scripts/publish.sh            创建 Release 并把结果挂上去
 scripts/cleanup.py            删除 24 小时前的 dl-* Release
 ```

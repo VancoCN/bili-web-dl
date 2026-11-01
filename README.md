@@ -79,15 +79,17 @@ scripts/cleanup.py            删除 24 小时前的 dl-* Release
 
 之后：粘贴链接 → 解析 → 选音频或视频 → 下载。
 
-### 可选：配置 Cookie 解锁更多档位
+### 可选：配置 Cookie 解锁 720P / 1080P
 
-不登录也能解析和下载，**具体能拿到哪些清晰度完全取决于 B 站接口对这条视频的返回**
-（实测未登录时有的视频能给到 1080P，有的只到 480P；60fps、HDR、大会员专享档位基本拿不到）。
+未登录（游客）时，`playurl` 虽然会声称「1080P 可选」，实际只返回 **360P / 480P** 的流。
+我在真实 runner 上实测就是这个结果。
 
-想要更稳、更高的档位，在仓库 **Settings → Secrets and variables → Actions** 里加一个
-`BILI_COOKIE`，内容是从浏览器复制的完整 Cookie 头（必须包含 `SESSDATA`、`DEDEUSERID`、`bili_jct`）。
+要更高清晰度，在仓库 **Settings → Secrets and variables → Actions** 里加一个 `BILI_COOKIE`，
+内容是从浏览器复制的完整 Cookie 头（必须包含 `SESSDATA`、`DEDEUSERID`、`bili_jct`）。
 
-工作流会把它写成 `cookies.txt` 交给 yt-dlp；没配置就自动降级为游客模式，不会报错。
+没有配置时脚本会自己伪造一套匿名 cookie（`buvid3` / `buvid4` / `_uuid`）——
+这不是为了登录，而是因为机房 IP 上「完全不带 cookie」的请求更容易被 412 拦，
+带上之后成功率明显提高。
 
 > Cookie 等同于账号凭证。只放进 Secrets，别贴进 issue、别提交到仓库。
 > 大会员画质还取决于账号本身有没有对应权益。
@@ -96,12 +98,16 @@ scripts/cleanup.py            删除 24 小时前的 dl-* Release
 
 | 项 | 情况 |
 | --- | --- |
-| 清晰度档位 | 由 B 站接口按视频 / 账号返回，页面展示的就是实际可用值（常见 360P–1080P） |
-| 竖屏视频 | B 站档位按**短边**算，代码里按 `min(width, height)` 归类，所以 360x480 显示为 360P |
-| 音频 | 独立音频流 64k / 132k / 192k，下载后转 MP3 |
-| 从点击到出链接 | 通常 30–90 秒，免费 runner 排队时更久；页面超时设 9 分钟 |
+| 清晰度档位 | 未登录实测只给 **360P / 480P**；配了 Cookie 才有 720P / 1080P 及以上 |
+| 档位标识 | 用 B 站自己的 `qn`（16=360P、32=480P、64=720P、80=1080P、120=4K），比按像素猜更可靠 |
+| 音频 | 取最高码率的 mp4a 流（常见 30280 / 192k），转成 MP3 |
+| 视频合并 | 视频流 + 音频流用 `ffmpeg -c copy` 合并，不重编码，几秒完成 |
+| 412 风控 | 机房 IP 会偶发 412，脚本带匿名 cookie + 三次退避重试；仍失败时页面会显示原因 |
+| ffmpeg | **ubuntu-latest 镜像不保证自带 ffmpeg**，工作流里显式 `apt-get install` 并校验 |
+| 耗时 | 实测解析约 1.5 秒、下载+转码约 3 秒，整体主要花在 runner 启动与 apt 装 ffmpeg（约 20–40 秒） |
 | 单文件上限 | Release 资产 2 GB，脚本在 1.9 GB 主动报错 |
 | 结果保留 | `dl-*` Release 24 小时后由工作流自动删除，旧链接会失效 |
+| 文件名 | 资产名用 `<job>_<BV号>.mp4`，因为 GitHub 会把中文文件名里的汉字整个丢掉 |
 | 私有仓库 | 不适用，资产下载要带上 token |
 | 番剧 / 付费内容 / 直播 | 拿不到，需要账号权限，会在页面显示 B 站返回的错误 |
 | Actions 使用条款 | 官方规定 Actions 不应用于与项目构建、测试、部署无关的用途。自己低频率用问题不大，但**不要拿它当公开的免费下载站**，流量一上来既会被限也会被处理 |
@@ -127,11 +133,19 @@ python -m http.server 8080      # 直接双击 index.html 也行
 # 打开 http://127.0.0.1:8080/index.html?demo=1 看演示数据，不会调用 GitHub
 ```
 
-单独测抓取（需要本机有 yt-dlp 和 ffmpeg）：
+单独测抓取（只需 python + 一个给力的网络，转码才需要 ffmpeg）：
 
 ```bash
-MODE=parse URL_RAW=BV1ugxq6HEfH JOB=test python scripts/bili.py
+MODE=parse  URL_RAW=BV1ugxq6HEfH JOB=test python scripts/bili.py
+MODE=download URL_RAW=BV1ugxq6HEfH JOB=test KIND=audio python scripts/bili.py
 cat out/meta.json
+```
+
+按 job 取回结果（和页面做的事一样）：
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/<owner>/<repo>/releases/tags/dl-<job>
 ```
 
 ## 免责声明

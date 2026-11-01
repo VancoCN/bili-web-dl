@@ -28,8 +28,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 OUT = Path("out")
@@ -62,10 +64,15 @@ def log(msg):
 
 def cookie_header():
     raw = (os.environ.get("BILI_COOKIE") or "").strip()
-    if not raw:
-        return ""
-    parts = [p.strip() for p in raw.replace("\n", ";").split(";") if "=" in p]
-    return "; ".join(parts)
+    if raw:
+        parts = [p.strip() for p in raw.replace("\n", ";").split(";") if "=" in p]
+        return "; ".join(parts)
+    # 没配置登录凭证时，伪造一套匿名 cookie。
+    # B 站对机房 IP 上「完全不带 cookie」的请求更容易直接 412，
+    # 带上 buvid3/buvid4/_uuid 能显著降低被拒概率（实测有效）。
+    u = lambda: str(uuid.uuid4())  # noqa: E731
+    return (f"buvid3={u()}infoc; buvid4={u()}; _uuid={u()}infoc; "
+            f"b_nut={int(time.time())}")
 
 
 COOKIE = cookie_header()
@@ -81,10 +88,33 @@ def req_headers(extra=None):
     return h
 
 
-def fetch_json(url, timeout=25):
-    req = urllib.request.Request(url, headers=req_headers())
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8", "replace"))
+def fetch_json(url, what="接口", timeout=25, attempts=3):
+    """带重试的 JSON 请求。412 是 B 站的机房 IP 风控，退避重试通常能过。"""
+    last = ""
+    for i in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers=req_headers())
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as exc:
+            last = f"HTTP {exc.code}"
+            if exc.code in (412, 429, 500, 502, 503) and i < attempts - 1:
+                wait = 1.5 * (i + 1)
+                log(f"{what} 返回 {exc.code}，{wait:.1f}s 后重试（{i + 1}/{attempts - 1}）")
+                time.sleep(wait)
+                continue
+            break
+        except Exception as exc:  # noqa: BLE001
+            last = f"{type(exc).__name__}: {exc}"
+            if i < attempts - 1:
+                time.sleep(1.5 * (i + 1))
+                continue
+            break
+    if "412" in last:
+        raise RuntimeError(
+            f"{what}被 B 站风控拒绝（412）。GitHub Actions 的机房 IP 常见此问题，"
+            "稍后重试通常可用；配置 BILI_COOKIE 会明显更稳。")
+    raise RuntimeError(f"{what}请求失败：{last}")
 
 
 def norm_target(raw):
@@ -106,7 +136,8 @@ def norm_target(raw):
 
 def wbi_mixin():
     """从 nav 接口取 img/sub key 算出 mixin key。未登录也能拿到。"""
-    data = fetch_json("https://api.bilibili.com/x/web-interface/nav").get("data") or {}
+    data = fetch_json("https://api.bilibili.com/x/web-interface/nav",
+                      what="签名密钥接口").get("data") or {}
     wbi = data.get("wbi_img") or {}
     img = os.path.basename(wbi.get("img_url", "")).split(".")[0]
     sub = os.path.basename(wbi.get("sub_url", "")).split(".")[0]
@@ -127,7 +158,8 @@ def fetch_playurl(query, cid, mixin):
     base = dict(q.split("=", 1) for q in query.split("&"))
     params = {**base, "cid": cid, "qn": "127", "fnval": "4048",
               "fnver": "0", "fourk": "1"}
-    payload = fetch_json("https://api.bilibili.com/x/player/wbi/playurl?" + signed(params, mixin))
+    payload = fetch_json("https://api.bilibili.com/x/player/wbi/playurl?" + signed(params, mixin),
+                         what="取流接口")
     if payload.get("code") != 0:
         raise RuntimeError(f"取流失败：{payload.get('message') or payload.get('code')}")
     return payload.get("data") or {}
@@ -307,7 +339,8 @@ def main():
         query, want_page = norm_target(URL_RAW)
         log(f"目标：{query} p={want_page}")
         mixin = wbi_mixin()
-        view = fetch_json(f"https://api.bilibili.com/x/web-interface/view?{query}")
+        view = fetch_json(f"https://api.bilibili.com/x/web-interface/view?{query}",
+                          what="视频信息接口")
         if view.get("code") != 0:
             raise RuntimeError(f"视频信息获取失败：{view.get('message') or view.get('code')}")
         data = view.get("data") or {}

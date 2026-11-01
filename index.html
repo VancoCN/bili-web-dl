@@ -456,11 +456,11 @@
     $('#mDesc').classList.toggle('hidden', !m.desc);
 
     var chips = [];
-    var tiers = (m.qualities || []).filter(function (q) { return q && q.label > 0; });
+    var tiers = (m.qualities || []).filter(function (q) { return q && q.qn; });
     tiers.slice().reverse().forEach(function (q, i) {
-      chips.push('<span class="chip' + (i === 0 ? ' hi' : '') + '">' + q.label + 'P</span>');
+      chips.push('<span class="chip' + (i === 0 ? ' hi' : '') + '">' + esc(q.label) + '</span>');
     });
-    if (m.audio_abr) chips.push('<span class="chip pk">音频 ' + Math.round(m.audio_abr) + ' kbps</span>');
+    if (m.audio) chips.push('<span class="chip pk">音频 ' + esc(m.audio.label || '') + '</span>');
     if (m.id) chips.push('<span class="chip">' + esc(m.id) + '</span>');
     if (!m.logged_in) chips.push('<span class="chip">未登录</span>');
     $('#mChips').innerHTML = chips.join('');
@@ -474,18 +474,20 @@
         }).join('')
       : '<option value="1">单个视频</option>';
     pageSel.disabled = pages.length <= 1;
+    if (m.current_page) pageSel.value = String(m.current_page);
 
     var q = $('#quality');
-    var labels = tiers.map(function (t) { return t.label; });
-    if (!labels.length) labels = [720];
-    var preferred = labels.indexOf(720) > -1 ? 720 : labels[labels.length - 1];
-    q.innerHTML = labels.map(function (v) {
-      return '<option value="' + v + '"' + (v === preferred ? ' selected' : '') + '>' + v + 'P</option>';
+    var opts = tiers.length ? tiers : [{ qn: 80, label: '1080P' }];
+    var fits = opts.filter(function (t) { return t.qn <= 64; });
+    var preferred = (fits.length ? fits[fits.length - 1] : opts[opts.length - 1]).qn;
+    q.innerHTML = opts.slice().reverse().map(function (t) {
+      return '<option value="' + t.qn + '"' + (t.qn === preferred ? ' selected' : '') + '>' +
+             esc(t.label) + '</option>';
     }).join('');
 
     $('#qHint').textContent = m.logged_in
-      ? '已配置 Cookie，可选档位取决于该账号对这条视频的权限（大会员 / 60fps 仍可能需要更高权益）。'
-      : '以上档位来自 B 站接口的实际返回；未登录时 60fps、HDR、大会员专享档位通常拿不到，配置 BILI_COOKIE 后可解锁。';
+      ? '已配置 Cookie。能拿到哪些档位取决于该账号对这条视频的权益（大会员内容仍需对应会籍）。'
+      : '这里的档位是 B 站当下实际返回的可下载选项。未登录通常只到 480P，配置 BILI_COOKIE 后可到 720P / 1080P。';
   }
 
   function setSteps(list, activeIdx) {
@@ -741,9 +743,9 @@
       ok: true, id: 'BV1ugxq6HEfH', title: '灭建国的超能力', uploader: '抽象生活先生',
       duration: 125.5, view: 1284000, cover: 'https://i1.hdslb.com/bfs/archive/2d149e67cd059e20a3a576a85b9d068a67e693db.jpg',
       desc: '这是一段用于界面预览的占位简介文本，实际内容由 Actions 解析 B 站接口后返回。',
-      qualities: [{ label: 360, height: 480 }, { label: 480, height: 640 },
-                  { label: 720, height: 960 }, { label: 1080, height: 1440 }],
-      audio_abr: 164.2, logged_in: false,
+      qualities: [{ qn: 16, label: '360P', height: 480 }, { qn: 32, label: '480P', height: 640 },
+                  { qn: 64, label: '720P', height: 960 }, { qn: 80, label: '1080P', height: 1440 }],
+      audio: { id: 30280, label: '192k' }, logged_in: false,
       pages: [{ index: 1, title: '正片', duration: 125 }, { index: 2, title: '花絮', duration: 96 }]
     });
     try {

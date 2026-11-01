@@ -4,6 +4,10 @@ name: bili-fetch
 # 结果统一发布到 Release（tag = dl-<job>）：
 #   Release 正文 = meta.json（前端读取的元数据 / 错误信息）
 #   Release 资产 = 下载好的 mp3 / mp4
+#
+# 注意：这里不用 yt-dlp。Actions runner 是机房 IP，B 站对 www.bilibili.com
+# 的网页请求会直接返回 HTTP 412（换 UA / 带 cookie / --impersonate 均无效），
+# 而 api.bilibili.com 正常，所以 scripts/bili.py 直接走官方 API。
 run-name: bili ${{ inputs.mode }} ${{ inputs.job }}
 
 on:
@@ -30,10 +34,10 @@ on:
         options: [audio, video]
         default: audio
       quality:
-        description: "视频高度上限：360 / 480 / 720 / 1080"
+        description: "视频档位 qn：80=1080P / 64=720P / 32=480P"
         required: false
         type: string
-        default: "720"
+        default: "80"
 
 permissions:
   contents: write
@@ -52,22 +56,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 安装 yt-dlp
+      - name: 环境检查
         run: |
-          python -m pip install -U --quiet yt-dlp
-          python -m yt_dlp --version
+          python -V
           ffmpeg -version | head -n 1
-
-      - name: 准备 Cookie（可选，用于 720P 以上）
-        env:
-          BILI_COOKIE: ${{ secrets.BILI_COOKIE }}
-        run: |
-          if [ -n "${BILI_COOKIE:-}" ]; then
-            printf '%s\n' "$BILI_COOKIE" > cookies.txt
-            echo "已启用 Cookie，可解析高清晰度"
-          else
-            echo "未配置 BILI_COOKIE，以游客身份运行（最高 480P）"
-          fi
 
       - name: 清理过期 Release
         continue-on-error: true
@@ -84,6 +76,7 @@ jobs:
           KIND: ${{ inputs.kind }}
           QUALITY: ${{ inputs.quality }}
           JOB: ${{ inputs.job }}
+          BILI_COOKIE: ${{ secrets.BILI_COOKIE }}
         run: python scripts/bili.py
 
       - name: 发布结果
